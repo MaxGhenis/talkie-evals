@@ -71,6 +71,17 @@ uv run talkie-evals harness \
   --sample-size 500
 ```
 
+Smoke test GSM8K (one question, generation pipeline only):
+
+```bash
+uv run talkie-evals harness \
+  --model-names talkie-1930-13b-it \
+  --tasks gsm8k \
+  --sample-size 1 \
+  --num-fewshot 0 \
+  --talkie-chat-template
+```
+
 Run a zero-shot GSM8K generation eval with the Talkie instruction template:
 
 ```bash
