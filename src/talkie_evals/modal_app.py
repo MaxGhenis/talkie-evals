@@ -6,7 +6,7 @@ import json
 import random
 import statistics
 import time
-from pathlib import Path
+from importlib import resources
 from typing import Any
 
 import modal
@@ -26,6 +26,7 @@ from talkie_evals.constants import (
     PYTHON_VERSION,
     TALKIE_GIT_REVISION,
 )
+from talkie_evals.talkie_loader import load_talkie
 
 app = modal.App("talkie-evals")
 
@@ -37,6 +38,9 @@ image = (
 )
 
 cache = modal.Volume.from_name(MODAL_VOLUME_NAME, create_if_missing=True)
+
+GSM8K_TEST_SIZE = 1319
+ARITHMETIC_TASK_SIZE = 2000
 
 
 def _parse_csv(value: str) -> list[str]:
@@ -55,40 +59,50 @@ def _provenance() -> dict[str, Any]:
     }
 
 
-def _load_talkie(model_name: str, cache_dir: str):
-    """Load Talkie while pinning HF model snapshots.
+def _expand_lm_eval_tasks(tasks: str) -> list[str]:
+    requested = _parse_csv(tasks)
+    if not requested:
+        return ["gsm8k"]
+    expanded = []
+    arithmetic_names = [task["name"] for task in ARITHMETIC_TASKS]
+    for task in requested:
+        if task == "arithmetic":
+            expanded.extend(arithmetic_names)
+        else:
+            expanded.append(task)
+    return expanded
 
-    Upstream Talkie currently calls hf_hub_download without a revision argument,
-    so we patch the function it imports before constructing the model.
-    """
-    import talkie.download as talkie_download
-    import talkie.generate as talkie_generate
-    from huggingface_hub import hf_hub_download
-    from talkie import Talkie
-    from talkie.config import MODELS
 
-    def get_model_files_pinned(
-        requested_model_name: str, cache_dir: str | Path | None = None
-    ) -> tuple[Path, Path]:
-        if requested_model_name not in MODELS:
-            available = ", ".join(sorted(MODELS))
-            raise ValueError(
-                f"Unknown model {requested_model_name!r}. Available: {available}"
+def _sample_indices(population_size: int, sample_size: int, seed: int) -> list[int]:
+    if sample_size <= 0 or sample_size >= population_size:
+        return list(range(population_size))
+    rng = random.Random(seed)
+    return sorted(rng.sample(range(population_size), sample_size))
+
+
+def _lm_eval_samples(task_names: list[str], sample_size: int, seed: int):
+    if sample_size <= 0:
+        return None
+    samples = {}
+    arithmetic_names = {task["name"] for task in ARITHMETIC_TASKS}
+    for task_name in task_names:
+        if task_name in arithmetic_names:
+            samples[task_name] = _sample_indices(
+                ARITHMETIC_TASK_SIZE, sample_size, seed
             )
-        spec = MODELS[requested_model_name]
-        kwargs: dict[str, Any] = {
-            "repo_id": spec.repo_id,
-            "revision": MODEL_REVISIONS[requested_model_name],
-        }
-        if cache_dir is not None:
-            kwargs["cache_dir"] = str(cache_dir)
-        ckpt_path = Path(hf_hub_download(filename=spec.checkpoint_filename, **kwargs))
-        vocab_path = Path(hf_hub_download(filename=spec.vocab_filename, **kwargs))
-        return ckpt_path, vocab_path
+        elif task_name == "gsm8k":
+            samples[task_name] = _sample_indices(GSM8K_TEST_SIZE, sample_size, seed)
+    return samples or None
 
-    talkie_download.get_model_files = get_model_files_pinned
-    talkie_generate.get_model_files = get_model_files_pinned
-    return Talkie(model_name, cache_dir=cache_dir)
+
+def _jsonable_lm_eval_result(result: dict[str, Any]) -> dict[str, Any]:
+    import json
+
+    from lm_eval.utils import handle_non_serializable
+
+    return json.loads(
+        json.dumps(result, default=handle_non_serializable, ensure_ascii=False)
+    )
 
 
 def _sample_rows(rows: list[dict[str, Any]], sample_size: int, seed: int) -> list[dict]:
@@ -258,7 +272,7 @@ def run_arithmetic_eval(
     model_results = []
     for model_name in requested_models:
         load_started = time.perf_counter()
-        talkie = _load_talkie(model_name, cache_dir="/cache/huggingface")
+        talkie = load_talkie(model_name, cache_dir="/cache/huggingface")
         cache.commit()
         model_load_seconds = time.perf_counter() - load_started
         task_results = []
@@ -332,6 +346,126 @@ def run_arithmetic_eval(
     }
 
 
+@app.function(
+    image=image,
+    gpu="A100-40GB",
+    memory=80_000,
+    volumes={"/cache": cache},
+    timeout=14_400,
+)
+def run_lm_eval_harness(
+    model_names: str = "talkie-1930-13b-base",
+    tasks: str = "arithmetic",
+    sample_size: int = 0,
+    limit: int | None = None,
+    seed: int = DEFAULT_SEED,
+    num_fewshot: int | None = None,
+    apply_talkie_chat_template: bool = False,
+    log_samples: bool = True,
+) -> dict[str, Any]:
+    import lm_eval
+    import lm_eval.evaluator
+    import torch
+    from lm_eval.tasks import TaskManager
+    from lm_eval.utils import make_table
+
+    from talkie_evals.lm_eval_model import TalkieLM
+
+    def no_git_commit_hash() -> None:
+        return None
+
+    lm_eval.evaluator.get_git_commit_hash = no_git_commit_hash
+
+    requested_models = _parse_csv(model_names)
+    if not requested_models:
+        raise ValueError("model_names must include at least one model")
+    unknown_models = set(requested_models) - set(MODEL_REVISIONS)
+    if unknown_models:
+        raise ValueError(f"Unknown model_names: {sorted(unknown_models)}")
+    if limit is not None and sample_size > 0:
+        raise ValueError("Use either limit or sample_size, not both")
+
+    task_names = _expand_lm_eval_tasks(tasks)
+    samples = _lm_eval_samples(task_names, sample_size, seed)
+    if sample_size > 0:
+        if samples is None:
+            raise ValueError(
+                "sample_size is only supported for pinned arithmetic and GSM8K "
+                "tasks. Use limit for other lm-eval tasks."
+            )
+        unsampled_tasks = sorted(set(task_names) - set(samples))
+        if unsampled_tasks:
+            raise ValueError(
+                "sample_size is only supported for pinned arithmetic and GSM8K "
+                f"tasks. Use limit for: {unsampled_tasks}"
+            )
+    task_path = str(resources.files("talkie_evals").joinpath("lm_eval_tasks"))
+
+    model_results = []
+    for model_name in requested_models:
+        load_started = time.perf_counter()
+        lm = TalkieLM(
+            model_name=model_name,
+            cache_dir="/cache/huggingface",
+            apply_talkie_chat_template=apply_talkie_chat_template,
+        )
+        cache.commit()
+        model_load_seconds = time.perf_counter() - load_started
+        task_manager = TaskManager(include_path=task_path)
+        eval_started = time.perf_counter()
+        result = lm_eval.simple_evaluate(
+            model=lm,
+            tasks=task_names,
+            num_fewshot=num_fewshot,
+            limit=limit,
+            samples=samples,
+            bootstrap_iters=0,
+            log_samples=log_samples,
+            task_manager=task_manager,
+            random_seed=seed,
+            numpy_random_seed=seed,
+            torch_random_seed=seed,
+            fewshot_random_seed=seed,
+            gen_kwargs={"do_sample": False, "temperature": 0.0},
+        )
+        if result is None:
+            raise RuntimeError("lm_eval.simple_evaluate returned None")
+        result = _jsonable_lm_eval_result(result)
+        model_results.append(
+            {
+                "model_name": model_name,
+                "model_revision": MODEL_REVISIONS[model_name],
+                "style": lm.talkie.spec.style,
+                "device": str(lm.talkie.device),
+                "cuda_name": torch.cuda.get_device_name(0)
+                if torch.cuda.is_available()
+                else None,
+                "apply_talkie_chat_template": apply_talkie_chat_template,
+                "model_load_seconds": model_load_seconds,
+                "eval_seconds": time.perf_counter() - eval_started,
+                "table": make_table(result),
+                "result": result,
+            }
+        )
+        del lm
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    return {
+        "kind": "lm_eval_harness",
+        "tasks": task_names,
+        "task_path": task_path,
+        "sample_size": sample_size,
+        "limit": limit,
+        "seed": seed,
+        "num_fewshot": num_fewshot,
+        "samples": samples,
+        "log_samples": log_samples,
+        "provenance": _provenance(),
+        "models": model_results,
+    }
+
+
 def _summarize_gsm8k(items: list[dict[str, Any]]) -> dict[str, Any]:
     correct_count = sum(1 for item in items if item["correct"])
     parsed_count = sum(1 for item in items if item["prediction"] is not None)
@@ -382,7 +516,7 @@ def run_gsm8k_eval(
         raise ValueError(f"Unknown model_name: {model_name}")
 
     load_started = time.perf_counter()
-    talkie = _load_talkie(model_name, cache_dir="/cache/huggingface")
+    talkie = load_talkie(model_name, cache_dir="/cache/huggingface")
     cache.commit()
     model_load_seconds = time.perf_counter() - load_started
 

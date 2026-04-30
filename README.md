@@ -3,10 +3,11 @@
 Reproducible numeracy evaluations for the Talkie language models, run on Modal
 CUDA GPUs. The package currently supports:
 
-- The EleutherAI/OpenAI arithmetic suite used by `lm-evaluation-harness`, scored
-  as log-likelihood accuracy: the exact answer completion must be the greedy
-  continuation under teacher forcing.
-- GSM8K generation probes, scored by exact final numeric answer parsing.
+- An `lm-evaluation-harness` runner for pinned arithmetic and GSM8K task
+  definitions.
+- A custom arithmetic audit runner that logs token-level target/top-token traces.
+- A custom GSM8K probe runner that logs prompts, completions, parsed answers, and
+  timing.
 
 This repo is intentionally narrow. It is for math/numeracy checks, not value
 forecasting or public-opinion forecasting.
@@ -46,7 +47,44 @@ Print the same list from the package:
 uv run talkie-evals provenance
 ```
 
-## Run arithmetic
+## Run lm-eval-harness
+
+Use this path for benchmark-style runs. Arithmetic is scored by log-likelihood,
+so there is no generation temperature. GSM8K is generated greedily with
+`do_sample: false` and `temperature: 0.0`.
+
+Smoke test one arithmetic task:
+
+```bash
+uv run talkie-evals harness \
+  --model-names talkie-1930-13b-it \
+  --tasks arithmetic_2da \
+  --sample-size 2
+```
+
+Run a sampled arithmetic comparison:
+
+```bash
+uv run talkie-evals harness \
+  --model-names talkie-1930-13b-base,talkie-1930-13b-it,talkie-web-13b-base \
+  --tasks arithmetic \
+  --sample-size 500
+```
+
+Run a zero-shot GSM8K generation eval with the Talkie instruction template:
+
+```bash
+uv run talkie-evals harness \
+  --model-names talkie-1930-13b-it \
+  --tasks gsm8k \
+  --sample-size 50 \
+  --num-fewshot 0 \
+  --talkie-chat-template
+```
+
+Use `--sample-size 0` to evaluate every example in the selected tasks.
+
+## Run custom arithmetic
 
 Smoke test one task:
 
@@ -69,7 +107,7 @@ uv run talkie-evals arithmetic \
 
 Use `--sample-size 0` to run all 2,000 examples per arithmetic task.
 
-## Run GSM8K
+## Run custom GSM8K
 
 ```bash
 uv run talkie-evals gsm8k \
@@ -100,4 +138,3 @@ The arithmetic task definitions in `lm-evaluation-harness` use
 completion is greedy. This package follows that convention. It does not give
 credit when the model prefers a semantically equivalent answer with different
 formatting, such as `Forty` instead of ` 40`.
-

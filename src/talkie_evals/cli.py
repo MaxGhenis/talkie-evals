@@ -65,9 +65,41 @@ def _run_gsm8k(args: argparse.Namespace) -> None:
     print(markdown_table(result))
 
 
+def _run_harness(args: argparse.Namespace) -> None:
+    from talkie_evals.modal_app import app, run_lm_eval_harness
+
+    with modal.enable_output(), app.run():
+        result = run_lm_eval_harness.remote(
+            model_names=args.model_names,
+            tasks=args.tasks,
+            sample_size=args.sample_size,
+            limit=args.limit,
+            seed=args.seed,
+            num_fewshot=args.num_fewshot,
+            apply_talkie_chat_template=args.talkie_chat_template,
+            log_samples=not args.no_log_samples,
+        )
+
+    output = args.output or (
+        f"results/lm_eval_{safe_name(args.model_names)}_{timestamp()}.json"
+    )
+    path = write_json(result, output)
+    print(f"Wrote {path}")
+    for model in result["models"]:
+        print()
+        print(model["model_name"])
+        print(model["table"])
+
+
 def _summarize(args: argparse.Namespace) -> None:
     result = read_json(args.path)
-    print(markdown_table(result))
+    if result.get("kind") == "lm_eval_harness":
+        for model in result["models"]:
+            print()
+            print(model["model_name"])
+            print(model["table"])
+    else:
+        print(markdown_table(result))
 
 
 def _provenance(_: argparse.Namespace) -> None:
@@ -136,6 +168,54 @@ def build_parser() -> argparse.ArgumentParser:
     gsm8k.add_argument("--top-k", type=int, default=20)
     _add_common_remote_args(gsm8k)
     gsm8k.set_defaults(func=_run_gsm8k)
+
+    harness = subparsers.add_parser(
+        "harness",
+        help="Run pinned lm-evaluation-harness tasks with the Talkie wrapper.",
+    )
+    harness.add_argument(
+        "--model-names",
+        default="talkie-1930-13b-base",
+        help="Comma-separated Talkie model names.",
+    )
+    harness.add_argument(
+        "--tasks",
+        default="arithmetic",
+        help=(
+            "Comma-separated lm-eval task names. Use 'arithmetic' for all "
+            "10 arithmetic tasks."
+        ),
+    )
+    harness.add_argument(
+        "--sample-size",
+        type=int,
+        default=0,
+        help="Deterministic sampled rows per known task. Use 0 for full tasks.",
+    )
+    harness.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Pass lm-eval limit. Do not combine with --sample-size.",
+    )
+    harness.add_argument(
+        "--num-fewshot",
+        type=int,
+        default=None,
+        help="Override task few-shot count. Defaults to the task YAML.",
+    )
+    harness.add_argument(
+        "--talkie-chat-template",
+        action="store_true",
+        help="Wrap prompts with Talkie's IT chat template before scoring/generation.",
+    )
+    harness.add_argument(
+        "--no-log-samples",
+        action="store_true",
+        help="Do not include lm-eval per-sample logs in result JSON.",
+    )
+    _add_common_remote_args(harness)
+    harness.set_defaults(func=_run_harness)
 
     summarize = subparsers.add_parser("summarize", help="Print a Markdown table.")
     summarize.add_argument("path", type=Path)

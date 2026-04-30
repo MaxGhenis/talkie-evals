@@ -13,7 +13,8 @@ MODAL_PIP_PACKAGES = [
     "tiktoken==0.12.0",
     "huggingface_hub[hf_transfer]==1.12.2",
     "hf_transfer==0.1.9",
-    "datasets==4.8.5",
+    "datasets==2.21.0",
+    "lm_eval==0.4.11",
     TALKIE_PACKAGE,
 ]
 
