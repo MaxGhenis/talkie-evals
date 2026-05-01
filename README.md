@@ -62,13 +62,14 @@ uv run talkie-evals harness \
   --sample-size 2
 ```
 
-Run a sampled arithmetic comparison:
+Run the full arithmetic comparison used in the blog:
 
 ```bash
 uv run talkie-evals harness \
   --model-names talkie-1930-13b-base,talkie-1930-13b-it,talkie-web-13b-base \
   --tasks arithmetic \
-  --sample-size 500
+  --sample-size 0 \
+  --output results/lm_eval_full_arithmetic_all_models.json
 ```
 
 Smoke test GSM8K (one question, generation pipeline only):
@@ -82,18 +83,31 @@ uv run talkie-evals harness \
   --talkie-chat-template
 ```
 
-Run a zero-shot GSM8K generation eval with the Talkie instruction template:
+Run full zero-shot GSM8K generation with the Talkie instruction template:
 
 ```bash
 uv run talkie-evals harness \
   --model-names talkie-1930-13b-it \
   --tasks gsm8k \
-  --sample-size 50 \
+  --sample-size 0 \
   --num-fewshot 0 \
-  --talkie-chat-template
+  --talkie-chat-template \
+  --output results/lm_eval_full_gsm8k_zero_shot_chat.json
 ```
 
-Use `--sample-size 0` to evaluate every example in the selected tasks.
+Run full 5-shot GSM8K generation with the task's standard few-shot prompt:
+
+```bash
+uv run talkie-evals harness \
+  --model-names talkie-1930-13b-it \
+  --tasks gsm8k \
+  --sample-size 0 \
+  --talkie-chat-template \
+  --output results/lm_eval_full_gsm8k_5shot_chat.json
+```
+
+Use `--sample-size 0` to evaluate every example in the selected tasks: 2,000
+validation rows per arithmetic task and 1,319 GSM8K test rows.
 
 ## Run custom arithmetic
 
@@ -107,7 +121,7 @@ uv run talkie-evals arithmetic \
   --log-examples 5
 ```
 
-Run the main comparison used in the blog draft:
+Run the sampled comparison used for the original arithmetic audit:
 
 ```bash
 uv run talkie-evals arithmetic \
