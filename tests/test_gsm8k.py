@@ -14,3 +14,8 @@ def test_gold_answer_extracts_gsm8k_marker():
 def test_extract_prediction_prefers_final_answer_language():
     text = "First I get 10. Therefore, the answer is $12."
     assert extract_prediction(text) == "12"
+
+
+def test_extract_prediction_ignores_trailing_comma():
+    text = "He has 5 lego sets left.\nGrade IX,"
+    assert extract_prediction(text) == "5"

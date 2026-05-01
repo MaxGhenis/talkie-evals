@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from decimal import Decimal, InvalidOperation
 
+NUMBER_PATTERN = r"[-+]?\$?\d[\d,]*(?:\.\d+)?%?"
+
 
 def normalize_number(value: str | None) -> str | None:
     if value is None:
@@ -23,7 +25,7 @@ def normalize_number(value: str | None) -> str | None:
 
 
 def gold_answer(answer: str) -> str | None:
-    match = re.search(r"####\s*([-+]?\$?[\d,]+(?:\.\d+)?%?)", answer)
+    match = re.search(rf"####\s*({NUMBER_PATTERN})", answer)
     if match:
         return normalize_number(match.group(1))
     return None
@@ -32,8 +34,8 @@ def gold_answer(answer: str) -> str | None:
 def extract_prediction(text: str) -> str | None:
     final_patterns = [
         r"(?:therefore|thus|so|answer|final answer|the answer is)[:\s$]*"
-        r"([-+]?\$?[\d,]+(?:\.\d+)?%?)",
-        r"####\s*([-+]?\$?[\d,]+(?:\.\d+)?%?)",
+        rf"({NUMBER_PATTERN})",
+        rf"####\s*({NUMBER_PATTERN})",
     ]
     for pattern in final_patterns:
         matches = re.findall(pattern, text, flags=re.IGNORECASE)
@@ -42,7 +44,7 @@ def extract_prediction(text: str) -> str | None:
             if parsed is not None:
                 return parsed
 
-    matches = re.findall(r"[-+]?\$?[\d,]+(?:\.\d+)?%?", text)
+    matches = re.findall(NUMBER_PATTERN, text)
     if not matches:
         return None
     return normalize_number(matches[-1])

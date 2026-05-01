@@ -2,6 +2,12 @@
 
 Compressed JSON artifacts for the Talkie-1930 math-evals blog draft.
 
+These are the original custom-run artifacts behind the published tables. They
+were generated before the package added the current full provenance block, so
+they should be read alongside the repository's pinned dependency, model, and
+dataset constants. New runs from the current package include more explicit
+provenance metadata in the result JSON.
+
 ## Files
 
 - `arithmetic_eval_talkie-1930-13b-base_talkie-1930-13b-it_talkie-web-13b-base_20260429_214800.json.gz`
@@ -15,6 +21,7 @@ Compressed JSON artifacts for the Talkie-1930 math-evals blog draft.
   - Custom GSM8K direct-answer generation probe used for the GSM8K table.
   - Model: `talkie-1930-13b-it`.
   - Sample: 50 rows, seed 1930.
+  - Decoding: `temperature=0.18`, `top_k=20`.
   - Logs prompts, raw completions, parsed answers, gold answers, correctness, token counts, and timings.
 
 - `gsm8k_eval_talkie-1930-13b-it_cot_20260429_170728.json.gz`
@@ -22,6 +29,7 @@ Compressed JSON artifacts for the Talkie-1930 math-evals blog draft.
   - Model: `talkie-1930-13b-it`.
   - Conditions: zero-shot chain-of-thought and 4-shot chain-of-thought.
   - Sample: 10 rows per condition, seed 1930.
+  - Decoding: `temperature=0.18`, `top_k=20`.
   - Logs prompts, raw completions, parsed answers, gold answers, correctness, token counts, and timings.
 
 Decompress with:
