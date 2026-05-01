@@ -11,4 +11,6 @@ dist/
 # Result JSONs can get large; keep the directory and add selected artifacts.
 results/*
 !results/.gitkeep
-
+!results/raw/
+!results/raw/*.md
+!results/raw/*.json.gz
